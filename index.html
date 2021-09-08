@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<xmp?
+<html>
+<head> 
+<style type="text/css">
+body {
+	background-color: #000000;
+	scrolling:no;
+}
+iframe {
+	position:fixed;
+	z-index:1;
+	top:52px; 
+	left:32px;
+}
+div#fixedheader {
+	position:fixed;
+	top:0px;
+	left:0px;
+	width:100%;
+	color:#CCC;
+	background:#333;
+	padding:21px;
+}
+div#fixedfooter {
+	position:fixed;
+	bottom:0px;
+	left:0px;
+	width:100%;
+	color:#CCC;
+	background:#333;
+	padding:22px;
+}
+canvas {
+	position:fixed;
+	top:60px;   
+	left:779px;
+}
+</style>
+</head>
+
+<!-- creates header and footer -->
+<body>
+<div id="fixedheader"></div>
+<div id="fixedfooter"></div>
+
+<!-- camera stream: 169.254.6.136 for access point, 10.101.177.80 for resnet legacy-->  
+<iframe src="http://192.168.254.72:9090/stream" frameborder="0" scrolling="no" height ="100%" width="100%"></iframe> 
+<br><br>
+
+<!-- keypress listener -->
+<p id="temp"></p>
+<script> /*
+document.onkeypress = function(evt) {
+	evt = evt || window.event;
+	var charCode = evt.keyCode || evt.which;
+	var charStr = String.fromCharCode(charCode);
+	document.getElementById("temp").innerHTML = charStr;
+}; */
+</script>
+
+<!-- contains functions for displaying thermal camera -->
+<script>
+function interpolate(arr){ // linearly interpolates array data to create more pixels
+        var oldsize = Math.sqrt(arr.length);
+	var size = 2*oldsize-1;
+        var newArr = [];
+        for(var i = 0; i < size*size; i++){ // initialize array
+                newArr.push(0);
+        }
+        for(var i = 0; i < size; i++){
+                for(var j = 0; j < size; j++){ // >
+                        if(i % 2 == 0 && j % 2 == 0){ // value copied from old arr
+                                newArr[i*size+j] = arr[(i/2)*oldsize + (j/2)];
+                        }
+                }
+        }
+        for(var i = 0; i < size; i++){
+                for(var j = 0; j < size; j++){ // >
+                        if(i % 2 == 1 && j % 2 == 1){ // first round of interpolation
+                                newArr[i*size+j] = (newArr[(i-1)*size+(j-1)] + newArr[(i+1)*size+(j-1)] + newArr[(i-1)*size+(j+1)] + newArr[(i+1)*size+(j+1)])/4;
+                        }
+                }
+        }
+        for(var i = 0; i < size; i++){
+                for(var j = 0; j < size; j++){ // >
+                        if(j == 0 && i % 2 == 1){ // left column
+                                newArr[i*size+j] = (newArr[(i-1)*size+(j)] + newArr[(i)*size+(j+1)] + newArr[(i+1)*size+(j)])/3;
+                        }
+                        else if(j == size-1 && i % 2 == 1){ // right column
+                                newArr[i*size+j] = (newArr[(i-1)*size+(j)] + newArr[(i)*size+(j-1)] + newArr[(i+1)*size+(j)])/3;
+                        }
+                        else if(i == 0 && j % 2 == 1){ // top row
+                                newArr[i*size+j] = (newArr[(i)*size+(j-1)] + newArr[(i+1)*size+(j)] + newArr[(i)*size+(j+1)])/3;
+                        }
+                        else if(i == size-1 && j % 2 == 1){ // bottom row
+                                newArr[i*size+j] = (newArr[(i)*size+(j-1)] + newArr[(i-1)*size+(j)] + newArr[(i)*size+(j+1)])/3;
+                        }
+                        else if((j % 2 == 1 && i % 2 == 0) || (j % 2 == 0 && i % 2 == 1)){
+                                newArr[i*size+j] = (newArr[(i)*size+(j-1)] + newArr[(i)*size+(j+1)] + newArr[(i-1)*size+(j)] + newArr[(i+1)*size+(j)])/4;
+                        }
+                }
+        }
+        return newArr;
+}
+
+function colorValue(value){  // returns a color for a value from [0,1]
+  var h = (1.0 - value) * 240
+  return "hsl(" + h + ", 100%, 50%)";
+}
+
+function changeToInts(arr){
+        for(var i = 0; i<arr.length; i++){ // >
+                arr[i] = Number(arr[i]);
+        }
+        return arr;
+}
+
+</script>
+
+<!-- displays thermal camera -->
+<canvas id="myCanvas" width="456" height="456"> 
+Your browser does not support HTML5 canvas.
+</canvas> 
+<script>
+var debug = document.getElementById("fixedheader");
+var canvas = document.getElementById("myCanvas");
+
+var ctx = canvas.getContext("2d");
+var size = 456; // size of canvas
+var num = 57; // squares per side length
+var sideLength = size/num; // side length of each square
+var sensitivity = 20; // how sensitive the camera is to heat [0,32)			
+
+function readThermalData()
+{
+    var rawFile = new XMLHttpRequest();
+    rawFile.open("GET", "thermalData.txt", false);
+    rawFile.onreadystatechange = function ()
+    {
+        if(rawFile.readyState === 4)
+        {
+	    //debug.innerHTML = rawFile.status;
+            if(rawFile.status === 200 || rawFile.status == 0)
+            {
+                var allText = rawFile.responseText;
+                var arr = allText.split(" ");
+		arr = changeToInts(arr); // changing array type to ints instead of string
+		arr.splice(64,1); // removing last element of arr 
+		//var newArr = arr;
+		var newArr = interpolate(arr); // 15x15
+		newArr.splice(225,4); // removing last 4 of newArr
+		newArr = interpolate(newArr); // 29x29
+		newArr = interpolate(newArr); // 57x57
+		var debugString = "";
+		for(var i = 0; i < num; i++){
+			for(var j = 0; j<num; j++){
+				debugString+=String(i*num+j)+":"+String(newArr[i*num+j].toFixed(1)) + " ";
+			}
+		}
+		//debug.innerHTML = newArr.length;  
+		for(var i = 0; i < num*num; i++){
+  			var y = i % num; // y coordinate of box
+                        var x = (i-y) / num; // x coordinate of box
+			if(isNaN(newArr[i])){ // checking for lapses in data transfer
+				break;
+			}
+			var val = ((newArr[i]-sensitivity)/(64-2*sensitivity));
+			if(val > 1){ // setting color for square
+				ctx.fillStyle = colorValue(1);
+			}
+			else{
+				ctx.fillStyle = colorValue(val);
+			}
+			//debug.innerHTML = val;
+			ctx.fillRect(x*sideLength, y*sideLength, sideLength, sideLength);
+		}
+	    }
+        }
+    }
+    rawFile.send(null);
+}
+
+window.setInterval(readThermalData, 1000);
+</script>
+
+<!-- displays sensor data for header and footer -->
+<script> 
+function readSensorData()
+{
+    var rawFile = new XMLHttpRequest();
+    rawFile.open("GET", "top.txt", false);
+    rawFile.onreadystatechange = function ()
+    {
+        if(rawFile.readyState === 4)
+        {
+            if(rawFile.status === 200 || rawFile.status == 0)
+            {
+                var allText = rawFile.responseText;
+                document.getElementById("fixedheader").innerHTML = allText;
+            }
+        }
+    }
+    rawFile.send(null);
+//}
+//function readBottomData()
+//{
+    //var rawFile = new XMLHttpRequest();
+    rawFile.open("GET", "bottom.txt", false);
+    rawFile.onreadystatechange = function ()
+    {
+        if(rawFile.readyState === 4)
+        {
+            if(rawFile.status === 200 || rawFile.status === 0)
+            {
+                var allText = rawFile.responseText;
+                document.getElementById("fixedfooter").innerHTML = allText;
+            }
+        }
+    }
+    rawFile.send(null);
+}
+
+
+window.setInterval(readSensorData,2000); 
+
+</script>
+
+
+<script>  // OLD TEMPORARY HEADER DATA 
+/*var header = document.getElementById("fixedheader");
+var headerHeight = header.scrollHeight;
+header.innerHTML = "Loading...";
+var extTemp = 75;
+var humidity = 50.2;
+var smokeLevel = 0.00;
+var coLevel = 0.64;
+var co2Level = 0.02;
+var soundLevel = Math.floor(Math.random()*100+1);
+var flames = "Yes";
+function printHeaderData(){
+	header.innerHTML = "External Temperature: " + extTemp + "&#8451; &emsp; Humidity: " + humidity + 
+	 "g/kg &emsp; Smoke Level: " + smokeLevel + " &emsp; Sound Level: " + soundLevel + "db";
+}
+window.setInterval(printHeaderData,2000); 
+
+
+var footer = document.getElementById("fixedfooter");
+var footerHeight = footer.scrollHeight;
+footer.innerHTML = "Loading...";
+var intTemp = 72;
+var tilt = 2;
+gpsLocation = Math.floor((Math.random()*100)+1);
+function printFooterData(){
+	footer.innerHTML = "Internal Temperature: " + intTemp + "&#8451; &emsp; Tilt: " + tilt + "&deg; &emsp; Location: " + gpsLocation;
+}
+window.setInterval(printFooterData, 2000); */
+</script>
+
+
+
+
+
+
+</body>
+</html>
+</xmp>
+
+
+
+
